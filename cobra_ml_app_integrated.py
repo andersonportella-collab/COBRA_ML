@@ -29,6 +29,45 @@ warnings.filterwarnings('ignore')
 import datetime
 import os
 
+# =============================================================================
+# CITAÇÕES (ABNT / APA)
+# =============================================================================
+
+CITATIONS = {
+    "ABNT": """
+**Formato ABNT:**
+
+**Software:**
+SANTOS, Marcos dos; GOMES, Carlos Francisco Simões. **COBRA Machine Learning Tool**.
+[S.l.]: Anderson Gonçalves Portella, 2025. Programa de Computador.
+
+**Artigo:**
+SILVA, C. S.; SANTOS, M. R.
+Análise do nível de maturidade em gestão de riscos: um estudo de caso em uma empresa do setor elétrico.
+In: CONGRESSO NACIONAL DE EXCELÊNCIA EM GESTÃO, 19., 2025, Online.
+**Anais...** Rio de Janeiro: CNEG, 2025.
+Acesso em: {date}.
+""",
+    "APA": """
+**APA Format:**
+
+**Software:**
+Portella, A. G., Santos, M. dos, & Gomes, C. F. S. (2025).
+*COBRA Machine Learning Tool* [Computer software].
+
+**Article:**
+Silva, C. S., & Santos, M. R. (2025).
+Risk management maturity level analysis: a case study in the electric sector.
+In *Proceedings of the XIX National Congress of Management Excellence*.
+"""
+}
+
+def get_citation(lang: str) -> str:
+    """Retorna a citação no formato apropriado conforme o idioma"""
+    citation_type = "ABNT" if lang == "Portuguese" else "APA"
+    today = datetime.datetime.now().strftime("%d %b. %Y")
+    return CITATIONS[citation_type].format(date=today)
+
 # OpenAI client — optional
 try:
     from openai import OpenAI
@@ -116,7 +155,8 @@ TRANSLATIONS = {
         "ai_chat": "💬 Chat Interativo com IA",
         "ai_chat_placeholder": "Faça perguntas sobre os resultados...",
         "ai_thinking": "🤖 Pensando...",
-        "language": "🌐 Idioma / Language"
+        "language": "🌐 Idioma / Language",
+        "citation_title": "📚 Como citar"
     },
     "English": {
         "title": "🐍 COBRA Machine Learning — UFF/EN",
@@ -188,7 +228,8 @@ TRANSLATIONS = {
         "ai_chat": "💬 Interactive AI Chat",
         "ai_chat_placeholder": "Ask questions about the results...",
         "ai_thinking": "🤖 Thinking...",
-        "language": "🌐 Language / Idioma"
+        "language": "🌐 Language / Idioma",
+        "citation_title": "📚 How to cite"
     }
 }
 
@@ -651,6 +692,11 @@ def main():
     - [Prof. Dr. Carlos Francisco Simões Gomes](https://www.linkedin.com/in/carlos-francisco-sim%2525C3%2525B5es-gomes-7284a3b/) - UFF
     """)
     
+    st.sidebar.markdown("---")
+    with st.sidebar.expander(t("citation_title", lang)):
+        st.markdown(get_citation(lang))
+    st.sidebar.markdown("---")
+
     st.sidebar.markdown("---")
     if st.sidebar.button(t("clear_results", lang)):
         # Limpar todas as variáveis de sessão relacionadas aos resultados
