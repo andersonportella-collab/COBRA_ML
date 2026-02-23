@@ -697,7 +697,24 @@ def main():
         st.markdown(get_citation(lang))
     st.sidebar.markdown("---")
 
+    # Manual de uso - download
+    _manual_label = "📖 Download User Manual" if lang == "English" else "📖 Baixar Manual do Usuário"
+    _manual_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "COBRA_ML_User_Manual.pdf")
+    if os.path.exists(_manual_path):
+        with open(_manual_path, "rb") as _f:
+            st.sidebar.download_button(
+                label=_manual_label,
+                data=_f.read(),
+                file_name="COBRA_ML_User_Manual.pdf",
+                mime="application/pdf"
+            )
+    else:
+        st.sidebar.caption(
+            "ℹ️ Manual not found. Place COBRA_ML_User_Manual.pdf in the app folder." if lang == "English"
+            else "ℹ️ Manual não encontrado. Coloque COBRA_ML_User_Manual.pdf na pasta do app."
+        )
     st.sidebar.markdown("---")
+
     if st.sidebar.button(t("clear_results", lang)):
         # Limpar todas as variáveis de sessão relacionadas aos resultados
         for key in list(st.session_state.keys()):
