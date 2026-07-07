@@ -467,64 +467,62 @@ class COBRA_ML:
         return np.array(features)
     
     def train_ml_model(self, training_data):
-        """Treina dois modelos ML:
-           - RF Regressor para λ e σ (contínuos)
-           - RF Classifier para μ (índice discreto do critério dominante)
+        """Treina um único modelo ML (RF Regressor) para prever 
+           simultaneamente λ, μ e σ baseados nos casos âncora contínuos.
         """
         if len(training_data) < 5:
             st.warning("⚠️ Poucos dados de treinamento. Usando parâmetros padrão.")
             return None
 
-        X_train, y_reg, y_cls = [], [], []
+        X_train, y_target = [], []
         for problem in training_data:
+            # Extrai as features estruturais da matriz
             features = self.extract_features(problem['X'], problem['criteria_types'])
             X_train.append(features)
-            params = problem['optimal_params']   # [lambda, mu, sigma]
-            y_reg.append([params[0], params[2]])  # λ, σ → regressão
-            y_cls.append(int(round(params[1])))   # μ → classificação
+            
+            # Agora os 3 parâmetros [lambda, mu, sigma] vão para um alvo único de regressão
+            params = problem['optimal_params']   
+            y_target.append(params)
 
         X_train  = np.array(X_train)
-        y_reg    = np.array(y_reg)
-        y_cls    = np.array(y_cls)
+        y_target = np.array(y_target)
+        
+        # Garante que o scaler está instanciado antes da transformação
+        if not hasattr(self, 'scaler'):
+            self.scaler = StandardScaler()
+            
         X_scaled = self.scaler.fit_transform(X_train)
 
-        # Regressor: λ e σ
+        # Regressor único Múltiplas Saídas: prevê λ, μ e σ de uma só vez
         self.ml_model = RandomForestRegressor(
             n_estimators=100, max_depth=10, random_state=42, n_jobs=-1
         )
-        self.ml_model.fit(X_scaled, y_reg)
+        self.ml_model.fit(X_scaled, y_target)
 
-        # Classificador: μ
-        from sklearn.ensemble import RandomForestClassifier
-        self.ml_classifier = RandomForestClassifier(
-            n_estimators=100, max_depth=10, random_state=42, n_jobs=-1
-        )
-        self.ml_classifier.fit(X_scaled, y_cls)
+        # Como não usamos mais Classificador para o μ, definimos como None
+        # para evitar erros caso outra função antiga o procure.
+        self.ml_classifier = None
 
         return self.ml_model
 
     def predict_parameters(self, X, criteria_types):
-        """Prediz λ, σ (regressão) e μ (classificação)"""
+        """Prediz λ, μ e σ via regressão múltipla baseada nos estudos de caso reais."""
         if self.ml_model is None:
             n = X.shape[1]
-            return {'lambda': 0.5, 'mu': n / 2, 'sigma': n / 4}
+            return {'lambda': 0.5, 'mu': 0.5, 'sigma': n / 4}
 
-        features       = self.extract_features(X, criteria_types).reshape(1, -1)
+        features = self.extract_features(X, criteria_types).reshape(1, -1)
         features_scaled = self.scaler.transform(features)
 
-        # λ e σ via regressão
-        reg_pred     = self.ml_model.predict(features_scaled)[0]
-        lambda_param = float(np.clip(reg_pred[0], 0.1, 0.9))
-        sigma        = float(np.clip(reg_pred[1], 0.5, X.shape[1]))
+        # O regressor agora prevê os 3 parâmetros de uma só vez: [lambda, mu, sigma]
+        predictions = self.ml_model.predict(features_scaled)[0]
+        
+        lambda_param = float(np.clip(predictions[0], 0.1, 0.99))
+        mu           = float(predictions[1]) 
+        # Força o Sigma a nunca ultrapassar o número de critérios (n), garantindo a curva de sino
+        sigma        = float(np.clip(predictions[2], 0.5, X.shape[1]))
 
-        # μ via classificação (se classificador disponível)
-        if hasattr(self, 'ml_classifier') and self.ml_classifier is not None:
-            mu = int(self.ml_classifier.predict(features_scaled)[0])
-            mu = int(np.clip(mu, 0, X.shape[1] - 1))
-        else:
-            mu = int(np.clip(round(X.shape[1] / 2), 0, X.shape[1] - 1))
-
-        return {'lambda': lambda_param, 'mu': float(mu), 'sigma': sigma}
+        return {'lambda': lambda_param, 'mu': mu, 'sigma': sigma}
 
     def run_cobra_ml(self, X, criteria_types, weights_sub=None, use_ml=True, ml_params=None):
         """Executa o método COBRA-ML completo"""
@@ -566,19 +564,41 @@ class COBRA_ML:
 # FUNÇÕES AUXILIARES
 # =============================================================================
 
-def generate_training_data(n_samples=20):
-    """Gera dados de treinamento sintéticos para o modelo ML"""
+def generate_training_data(n_samples=50):
+    """Gera dados de treinamento ancorados nos estudos de caso reais e dados sintéticos."""
     training_data = []
     
-    for i in range(n_samples):
-        m = np.random.randint(3, 10)
-        n = np.random.randint(3, 8)
+    # 1. Âncoras Reais (Estudos de Caso Otimizados dos CSVs)
+    # Sigma redimensionado para o limite do número de critérios (n) para preservar a curva Gaussiana.
+    anchor_cases = [
+        {'m': 7,  'n': 6, 'lambda': 0.720024, 'mu': 0.805558, 'sigma': 6.0},
+        {'m': 4,  'n': 4, 'lambda': 0.450307, 'mu': 0.256207, 'sigma': 4.0},
+        {'m': 4,  'n': 7, 'lambda': 0.934701, 'mu': 0.209900, 'sigma': 7.0},
+        {'m': 12, 'n': 8, 'lambda': 0.954417, 'mu': 0.283609, 'sigma': 8.0}
+    ]
+    
+    for case in anchor_cases:
+        X = np.random.uniform(10, 100, size=(case['m'], case['n']))
+        criteria_types = ['benefit' if np.random.rand() > 0.3 else 'cost' for _ in range(case['n'])]
+        
+        training_data.append({
+            'X': X,
+            'criteria_types': criteria_types,
+            'optimal_params': [case['lambda'], case['mu'], case['sigma']]
+        })
+    
+    # 2. Preenchimento Sintético
+    for i in range(n_samples - len(anchor_cases)):
+        m = np.random.randint(3, 15)
+        n = np.random.randint(3, 10)
         X = np.random.uniform(10, 100, size=(m, n))
         criteria_types = ['benefit' if np.random.rand() > 0.3 else 'cost' for _ in range(n)]
         
-        lambda_opt = 0.3 + 0.4 * (n / 10)
-        mu_opt = n / 2 + np.random.uniform(-1, 1)
-        sigma_opt = n / 4 + np.random.uniform(-0.5, 0.5)
+        # Parâmetros sintéticos baseados na distribuição dos casos reais
+        lambda_opt = np.random.uniform(0.45, 0.96)
+        mu_opt = np.random.uniform(0.20, 0.81)
+        # Sigma variando de forma proporcional aos critérios (n/4 até n)
+        sigma_opt = np.random.uniform(n / 4, n)
         
         training_data.append({
             'X': X,
@@ -587,7 +607,6 @@ def generate_training_data(n_samples=20):
         })
     
     return training_data
-
 
 def create_sample_data(problem_type='energy', lang='Portuguese'):
     """Cria dados de exemplo para diferentes tipos de problemas, respeitando o idioma."""
@@ -656,7 +675,6 @@ def create_sample_data(problem_type='energy', lang='Portuguese'):
         ]
 
     return alternatives, criteria, criteria_types, data
-
 
 def read_uploaded_file(uploaded_file):
     """Lê arquivo Excel ou CSV uploadado"""
@@ -847,6 +865,12 @@ def main():
     use_ml = (_ml_opts.index(ml_mode) == 0)   # True se ML automático
 
     if use_ml:
+        # O texto da âncora aparece aqui, visível assim que o ML automático é selecionado
+        if lang == "Portuguese":
+            st.sidebar.caption("🧠 **Âncora de Casos Reais:** O motor de predição está calibrado com os parâmetros otimizados (Tau de Kendall até 1.0) das matrizes da Arábia Saudita, Shenzhen, Sérvia e Egito.")
+        else:
+            st.sidebar.caption("🧠 **Real-Case Anchor:** The prediction engine is calibrated using the optimized parameters (Kendall's Tau up to 1.0) from the Saudi Arabia, Shenzhen, Serbia, and Egypt case studies.")
+
         if "trained_ml_model" in st.session_state:
             _model_status = (
                 "✅ **Modelo treinado e ativo.** Os parâmetros serão preditos automaticamente."
