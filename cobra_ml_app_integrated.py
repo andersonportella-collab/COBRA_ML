@@ -22,7 +22,6 @@ import json
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
-import plotly.express as px
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -388,7 +387,12 @@ class COBRA_ML:
                 denom = np.sqrt(np.sum(col**2))
                 R[:, j] = col / denom if denom != 0 else col
             else:  # cost
-                inv_col = 1.0 / col
+                # Guard: valores zero em critério de custo geram 1/0 = inf e depois NaN,
+                # corrompendo silenciosamente o ranking. Neutraliza o inf/NaN.
+                # Para dados sem zeros este bloco é numericamente idêntico ao original.
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    inv_col = 1.0 / col
+                inv_col = np.nan_to_num(inv_col, nan=0.0, posinf=0.0, neginf=0.0)
                 denom = np.sqrt(np.sum(inv_col**2))
                 R[:, j] = inv_col / denom if denom != 0 else inv_col
         
@@ -999,13 +1003,6 @@ def main():
             _ex_df = pd.DataFrame(_ex_data, columns=_ex_crit)
             _ex_df.insert(0, "Alternatives" if lang == "English" else "Alternativas", _ex_alts)
 
-            # Linha de tipos como comentário de referência
-            _type_row = pd.DataFrame(
-                [["criterion_type"] + _ex_types],
-                columns=_ex_df.columns
-            )
-            _ex_with_types = pd.concat([_type_row, _ex_df], ignore_index=True)
-
             st.dataframe(_ex_df, use_container_width=True)
 
             _note = (
@@ -1138,7 +1135,7 @@ def main():
                 crit = st.text_input(f"Critério {i+1}", value=f"C{i+1}", key=f"crit_{i}")
                 criteria.append(crit)
             with col2:
-                ctype = st.selectbox(f"Tipo", ['benefit', 'cost'], key=f"type_{i}")
+                ctype = st.selectbox("Tipo", ['benefit', 'cost'], key=f"type_{i}")
                 criteria_types.append(ctype)
         
         # Entrada de dados
@@ -1336,7 +1333,14 @@ def main():
                 columns=criteria,
                 index=alternatives
             )
-            st.dataframe(norm_df.style.format("{:.4f}").background_gradient(cmap='RdYlGn'))
+            try:
+                st.dataframe(
+                    norm_df.style.format("{:.4f}").background_gradient(cmap='RdYlGn'),
+                    use_container_width=True
+                )
+            except ImportError:
+                # Fallback sem matplotlib: mantém a tabela formatada, sem gradiente de cor
+                st.dataframe(norm_df.style.format("{:.4f}"), use_container_width=True)
             
             st.write(t("weighted_matrix", lang))
             st.info("ℹ️ " + ("Matriz normalizada × pesos finais" if lang == "Portuguese" else "Normalized matrix × final weights"))
@@ -1345,7 +1349,14 @@ def main():
                 columns=criteria,
                 index=alternatives
             )
-            st.dataframe(weighted_df.style.format("{:.4f}").background_gradient(cmap='Blues'))
+            try:
+                st.dataframe(
+                    weighted_df.style.format("{:.4f}").background_gradient(cmap='Blues'),
+                    use_container_width=True
+                )
+            except ImportError:
+                # Fallback sem matplotlib: mantém a tabela formatada, sem gradiente de cor
+                st.dataframe(weighted_df.style.format("{:.4f}"), use_container_width=True)
         
         # TAB 4: PARÂMETROS
         with tab4:
